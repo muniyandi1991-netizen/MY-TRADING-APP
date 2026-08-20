@@ -1,12 +1,13 @@
-﻿import streamlit as st
+import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import requests
 from streamlit_lightweight_charts import renderLightweightCharts
 
-st.set_page_config(page_title="High Precision 2x Volume Trading Terminal", layout="wide")
+st.set_page_config(page_title="Universal High-Precision Trading Terminal", layout="wide")
 
-# Custom UI Styling: Clean White Theme, Compact Font, High Readability
+# Custom UI Styling
 st.markdown("""
     <style>
     .main { background-color: #F8F9FA; color: #1E222D; }
@@ -17,11 +18,13 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.write("### 🎯 2x Volume Surge & Multi-Confluence Precision Terminal")
+st.write("### 🎯 2x Volume Surge & Mobile Instant Alert Terminal")
 
 # Session state initialization
 if 'selected_ticker' not in st.session_state:
     st.session_state.selected_ticker = "^NSEI"
+if 'sent_alerts' not in st.session_state:
+    st.session_state.sent_alerts = set()
 
 POPULAR_INSTRUMENTS = {
     "NIFTY 50 (Index)": "^NSEI",
@@ -37,9 +40,43 @@ POPULAR_INSTRUMENTS = {
 }
 
 WATCHLIST = [
-    "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "SBIN.NS",
-    "BHARTIARTL.NS", "INFY.NS", "ITC.NS", "TATAMOTORS.NS", "TATAPOWER.NS"
+    "^NSEI", "^NSEBANK", "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "SBIN.NS",
+    "BHARTIARTL.NS", "INFY.NS", "ITC.NS", "TATAPOWER.NS", "COFORGE.NS"
 ]
+
+# Mobile Telegram Alert Sender Function
+def send_telegram_alert(bot_token, chat_id, message):
+    if bot_token and chat_id:
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        payload = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
+        try:
+            requests.post(url, json=payload, timeout=5)
+        except:
+            pass
+
+# Sidebar: Mobile Alert Settings (Top of Sidebar)
+st.sidebar.header("📱 Mobile Alert Settings")
+enable_alerts = st.sidebar.checkbox("Enable Mobile Alerts", value=True)
+telegram_bot_token = st.sidebar.text_input("Telegram Bot Token", type="password", placeholder="Paste Bot Token here")
+telegram_chat_id = st.sidebar.text_input("Telegram Chat ID", placeholder="Paste Chat ID here")
+
+if st.sidebar.button("📲 Test Mobile Alert"):
+    if telegram_bot_token and telegram_chat_id:
+        send_telegram_alert(telegram_bot_token, telegram_chat_id, "✅ *Trading Terminal Alert Working!* \nReady to receive live Buy/Sell signals.")
+        st.sidebar.success("Test alert sent to your mobile!")
+    else:
+        st.sidebar.error("Enter Token & Chat ID first.")
+
+st.sidebar.markdown("---")
+st.sidebar.header("⚙️ Strategy Parameters")
+timeframe = st.sidebar.selectbox("Timeframe:", ["5m", "15m", "1h", "1d"], index=1)
+period_map = {"5m": "5d", "15m": "1mo", "1h": "3mo", "1d": "1y"}
+period = period_map[timeframe]
+
+volume_multiplier = st.sidebar.slider("Volume Surge Multiplier:", 1.0, 3.0, 2.0, 0.1)
+ema_fast = st.sidebar.number_input("Fast EMA", value=20)
+ema_mid = st.sidebar.number_input("Mid EMA", value=50)
+ema_slow = st.sidebar.number_input("Trend Filter (EMA 200)", value=200)
 
 # Top Search Bar
 search_col1, search_col2 = st.columns([2, 3])
@@ -85,7 +122,7 @@ def calculate_atr(df, period=14):
     tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
     return tr.rolling(window=period).mean()
 
-# Scanner Engine with 2x Volume Filter
+# Scanner Engine
 @st.cache_data(ttl=120)
 def scan_market_stocks(stock_list):
     scan_results = []
@@ -122,7 +159,7 @@ def scan_market_stocks(stock_list):
                     tgt = c_price
                     sl = c_price
                     
-                clean_symbol = s.replace(".NS", "")
+                clean_symbol = s.replace(".NS", "").replace("^", "")
                 scan_results.append({
                     "Symbol": clean_symbol,
                     "Ticker": s,
@@ -139,7 +176,7 @@ def scan_market_stocks(stock_list):
 
 market_df = scan_market_stocks(WATCHLIST)
 
-# --- Top 5 Gainers & Losers Tables ---
+# Top 5 Gainers & Losers Tables
 if not market_df.empty:
     top_gainers = market_df.sort_values(by="Change", ascending=False).head(5).reset_index(drop=True)
     top_losers = market_df.sort_values(by="Change", ascending=True).head(5).reset_index(drop=True)
@@ -163,18 +200,7 @@ if not market_df.empty:
 
 st.markdown("---")
 
-# --- Sidebar Controls ---
-st.sidebar.header("⚙️ Strategy & Volume Controls")
-timeframe = st.sidebar.selectbox("Timeframe (5m/15m recommended):", ["5m", "15m", "1h", "1d"], index=1)
-period_map = {"5m": "5d", "15m": "1mo", "1h": "3mo", "1d": "1y"}
-period = period_map[timeframe]
-
-volume_multiplier = st.sidebar.slider("Volume Surge Multiplier (2x Standard):", min_value=1.0, max_value=3.0, value=2.0, step=0.1)
-ema_fast = st.sidebar.number_input("Fast EMA", value=20)
-ema_mid = st.sidebar.number_input("Mid EMA", value=50)
-ema_slow = st.sidebar.number_input("Trend Filter (Slow EMA 200)", value=200)
-
-# --- Chart & High Precision Backtest Engine ---
+# Strategy Processing & Chart
 if ticker:
     stock = yf.Ticker(ticker)
     df = stock.history(period=period, interval=timeframe)
@@ -191,7 +217,6 @@ if ticker:
             df['display_time'] = df['Datetime_IST'].dt.strftime('%d-%b-%Y')
             df['chart_time'] = df['Datetime_IST'].dt.strftime('%Y-%m-%d')
             
-        # Indicator Calculations
         df['EMA_Fast'] = df['Close'].ewm(span=ema_fast, adjust=False).mean()
         df['EMA_Mid'] = df['Close'].ewm(span=ema_mid, adjust=False).mean()
         df['EMA_Slow'] = df['Close'].ewm(span=ema_slow, adjust=False).mean()
@@ -200,17 +225,14 @@ if ticker:
         df['ATR'] = calculate_atr(df, 14)
         df['Vol_SMA'] = df['Volume'].rolling(window=20).mean()
         
-        # 2x Volume Filter Check (Adaptive for Indices where volume may be 0)
         has_volume = (df['Volume'] > 0).any()
         if has_volume:
             volume_condition = df['Volume'] >= (df['Vol_SMA'] * volume_multiplier)
         else:
-            # For Spot Index without volume data, use Candle Range Momentum as surrogate
             candle_range = df['High'] - df['Low']
             avg_range = candle_range.rolling(window=20).mean()
             volume_condition = candle_range >= (avg_range * 1.5)
         
-        # Multi-Confluence Strict Signal Rules
         call_cond = (df['Close'] > df['EMA_Fast']) & (df['EMA_Fast'] > df['EMA_Mid']) & \
                     (df['Close'] > df['EMA_Slow']) & (df['MACD'] > df['Signal_Line']) & \
                     (df['RSI'] >= 52) & (df['RSI'] <= 70) & volume_condition
@@ -232,7 +254,32 @@ if ticker:
                 signals.append(0)
         df['Signal'] = signals
         
-        # Format Data for Lightweight Charts
+        # Check Latest Signal for Mobile Push Notification
+        last_bar = df.iloc[-1]
+        last_sig_time = str(last_bar['chart_time'])
+        alert_key = f"{ticker}_{last_sig_time}_{last_bar['Signal']}"
+        
+        if enable_alerts and last_bar['Signal'] != 0 and alert_key not in st.session_state.sent_alerts:
+            sig_name = "🟢 2x VOLUME BUY CALL (CE)" if last_bar['Signal'] == 1 else "🔴 2x VOLUME BUY PUT (PE)"
+            atr_v = last_bar['ATR'] if not np.isnan(last_bar['ATR']) else (last_bar['Close'] * 0.005)
+            entry_p = last_bar['Close']
+            
+            tgt_p = entry_p + (2.4 * atr_v) if last_bar['Signal'] == 1 else entry_p - (2.4 * atr_v)
+            sl_p = entry_p - (1.2 * atr_v) if last_bar['Signal'] == 1 else entry_p + (1.2 * atr_v)
+            
+            msg = (
+                f"🚨 *NEW TRADING ALERT!* 🚨\n\n"
+                f"📊 *Asset:* {ticker}\n"
+                f"⚡ *Signal:* {sig_name}\n"
+                f"💰 *Entry Price:* ₹{entry_p:.2f}\n"
+                f"🎯 *Target (1:2):* ₹{tgt_p:.2f}\n"
+                f"🛑 *Stop Loss:* ₹{sl_p:.2f}\n"
+                f"⏰ *Time:* {last_bar['display_time']}\n"
+            )
+            send_telegram_alert(telegram_bot_token, telegram_chat_id, msg)
+            st.session_state.sent_alerts.add(alert_key)
+            st.toast(f"Mobile Alert Sent for {ticker}!", icon="📲")
+        
         candles = []
         ema_fast_data = []
         ema_mid_data = []
@@ -275,8 +322,7 @@ if ticker:
             {"type": "Line", "data": ema_slow_data, "options": {"color": "#E65100", "lineWidth": 2, "title": f"EMA {ema_slow} (Trend)"}}
         ]
         
-        last_row = df.iloc[-1]
-        last_price = last_row['Close']
+        last_price = last_bar['Close']
         strike_step = 50 if "^NSEI" in ticker else (100 if "^NSEBANK" in ticker else 10)
         atm_strike = round(last_price / strike_step) * strike_step
         
@@ -284,12 +330,12 @@ if ticker:
         col1.metric("Active Instrument", ticker)
         col2.metric("Spot Price", f"₹{last_price:.2f}" if ".NS" in ticker or "^" in ticker else f"${last_price:.2f}")
         col3.metric("Suggested ATM Strike", f"{atm_strike}")
-        col4.metric("RSI (14)", f"{last_row['RSI']:.2f}")
-        col5.metric("Market Trend", "STRONG BULLISH 🚀" if last_price > last_row['EMA_Slow'] else "STRONG BEARISH 🔻")
+        col4.metric("RSI (14)", f"{last_bar['RSI']:.2f}")
+        col5.metric("Market Trend", "STRONG BULLISH 🚀" if last_price > last_bar['EMA_Slow'] else "STRONG BEARISH 🔻")
         
         renderLightweightCharts([{"chart": chartOptions, "series": series}], f"chart_{ticker}")
         
-        # Backtest Accuracy Verification Engine (1:2 Risk-to-Reward)
+        # Backtest Accuracy Verification
         trade_logs = []
         target_hits = 0
         sl_hits = 0
